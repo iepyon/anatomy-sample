@@ -1,8 +1,8 @@
-// Shared model and moving geometry for the sprint indexer. No imports: the build
+// Shared model and moving geometry for the sprint feedback rig. No imports: the build
 // inlines this file into the page (with `export` stripped), so the browser rebuilds
 // the moving parts from exactly the code that drew them at rest.
 
-export const SP_N = 6; // slots on the Geneva wheel = sprints to the Product Goal
+export const SP_N = 6; // slots on the Geneva wheel: it indexes once per sprint, as a clock
 export const SP_C = 44; // crank centre to Geneva centre
 export const SP_A = SP_C * Math.sin(Math.PI / SP_N); // crank radius (22): the pin enters each slot radially
 export const SP_G = [70, 0]; // Geneva wheel centre
@@ -16,23 +16,43 @@ export const SP_LOCK_R = 14; // locking disc on the crank shaft
 export const SP_CUT_R = 39.6; // relief cut in the locking disc that lets the wheel's tips pass
 export const SP_Z = { gen: 19.5, genTop: 24, arm: 26.5, armTop: 29.5 };
 export const SP_SPOOL_R = 12;
-export const SP_CORD_Z = 30.5;
-export const SP_STEP = (2 * Math.PI * SP_SPOOL_R) / SP_N; // carriage travel per sprint
-export const SP_TRAVEL = SP_STEP * SP_N;
+export const SP_CORD_Z = 31.5;
+export const SP_CAP = (2 * Math.PI * SP_SPOOL_R) / SP_N; // most one sprint can wind: one full index
+export const SP_TRAVEL = SP_CAP * SP_N; // distance from the start to the Product Goal
 export const SP_STOP_X = 22; // face of the Product Goal stop
 export const SP_CAR = { w: 40, d: 32, y: 0, z: 4, top: 10 };
 export const SP_X0 = SP_STOP_X - SP_CAR.w - SP_TRAVEL; // carriage left edge at the start
 export const SP_TURN = Math.PI * 2;
 export const SP_ENTRY = (4 * Math.PI) / 3; // into each crank turn, the pin reaches a slot
-export const SP_U_GOAL = SP_TURN * SP_N;
 export const SP_ANCHOR_X = -110;
 export const SP_SPRING = { y: 16, z: 7, r: 3, turns: 14 };
-export const SP_BLOCKS = [
-  [3, 3], [13, 3], [23, 3],
-  [3, 17], [13, 17], [23, 17],
-].map(([x, y]) => ({ x, y, w: 8.6, d: 12, r: 0.8 }));
-export const SP_BLOCK_H = 6;
+export const SP_SLOTS = 12; // room on the carriage (and tiles in the hopper) for the longest run
+export const SP_BLOCKS = Array.from({ length: SP_SLOTS }, (_, i) => ({ x: 3 + (i % 4) * 7.2, y: 3 + Math.floor(i / 4) * 9, w: 6.2, d: 8, r: 0.7 }));
+export const SP_BLOCK_H = 5;
 export const SP_POST = [36, 16];
+export const SP_TAPE_Z = 16.5;
+export const SP_GAUGE = { x: 27.2, y: 16, r: 4.6, z: 14, top: 19 }; // tape gauge on the goal stop
+export const SP_TAPE_OUT = SP_GAUGE.x - SP_GAUGE.r; // where the tape leaves its case
+
+// What each sprint delivers: the team's throughput varies (0.62–1.0 of a full index), and
+// the review caps the next increment at the remaining gap the tape measured. Sprints repeat
+// until the gap is zero, so how many it takes comes out of the loop, not out of a plan.
+export function planFor(seed) {
+  let x = (seed * 2654435761 + 97) >>> 0;
+  const rand = () => {
+    x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0;
+    return x / 4294967296;
+  };
+  const deliveries = [];
+  let gap = SP_TRAVEL;
+  while (gap > 1e-9 && deliveries.length < SP_SLOTS) {
+    const made = SP_CAP * (0.62 + 0.38 * rand());
+    const step = Math.min(made, gap);
+    deliveries.push(step);
+    gap -= step;
+  }
+  return { deliveries, n: deliveries.length, goal: SP_TURN * deliveries.length };
+}
 
 const spWrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const spDir = (a) => [Math.cos(a), Math.sin(a)];
@@ -112,13 +132,14 @@ export function armRing(phi) {
   ];
 }
 
-// The model: crank travel u (radians since the goal was set) → crank angle, wheel angle, sprints done.
-export function sprintState(u) {
-  const clamped = Math.max(0, Math.min(SP_U_GOAL, u));
+// The model: crank travel u (radians since the goal was set) → crank angle, wheel angle,
+// sprints done and the carriage's travel, which the spool's slip clutch limits to each delivery.
+export function sprintState(u, plan) {
+  const clamped = Math.max(0, Math.min(plan.goal, u));
   let j = Math.floor(clamped / SP_TURN);
   let f = clamped - j * SP_TURN;
-  if (j >= SP_N) {
-    j = SP_N - 1;
+  if (j >= plan.n) {
+    j = plan.n - 1;
     f = SP_TURN;
   }
   const phi = Math.PI / 3 + clamped;
@@ -132,7 +153,10 @@ export function sprintState(u) {
     frac = Math.min(1, -part / (Math.PI / 3));
   }
   const beta = (-j * Math.PI) / 3 + part;
-  return { phi, beta, sprint: j, engaged, frac, worked: f / SP_ENTRY, travel: -beta * SP_SPOOL_R, done: j + (engaged ? frac : 0) };
+  let before = 0;
+  for (let i = 0; i < j; i++) before += plan.deliveries[i];
+  const travel = before + plan.deliveries[j] * frac;
+  return { phi, beta, sprint: j, engaged, frac, travel, gapBefore: SP_TRAVEL - before, gapAfter: SP_TRAVEL - before - plan.deliveries[j], gap: SP_TRAVEL - travel, done: j + (engaged ? frac : 0) };
 }
 
 // A concave plate (slots, relief cuts): its inner walls that face the viewer can sit behind the
@@ -181,7 +205,7 @@ export function drawSpoolMark(angle, P, K) {
   const [gx, gy] = SP_G;
   const z = 38;
   const tip = [gx + 13 * Math.cos(angle), gy + 13 * Math.sin(angle)];
-  const tail = [gx + 5 * Math.cos(angle), gy + 5 * Math.sin(angle)];
+  const tail = [gx + 6 * Math.cos(angle), gy + 6 * Math.sin(angle)];
   return K.lineSvg(K.lineOnTop(tail, tip, z, P), { tone: "hi" }) + K.dotsSvg([K.iso([tip[0], tip[1], z], P)], { size: 0.5, tone: "hi" });
 }
 
@@ -189,6 +213,20 @@ export function drawSpring(left, P, K) {
   const c = K.coil(SP_ANCHOR_X, left, [SP_SPRING.y, SP_SPRING.z], SP_SPRING.r, SP_SPRING.turns, "x", P);
   const ends = [K.iso([SP_ANCHOR_X, SP_SPRING.y + SP_SPRING.r, SP_SPRING.z], P), K.iso([left, SP_SPRING.y + SP_SPRING.r, SP_SPRING.z], P)];
   return K.lineSvg(c.back, { tone: "lo" }) + K.lineSvg(c.front, { tone: "mid" }) + K.dotsSvg(ends, { size: 0.7, tone: "mid" });
+}
+
+// The feedback signal: the tape from the gauge case to the carriage post, and the gauge's needle.
+export function drawTape(left, P, K) {
+  const from = [left + SP_POST[0] + 2.2, SP_POST[1], SP_TAPE_Z];
+  const to = [SP_TAPE_OUT, SP_POST[1], SP_TAPE_Z];
+  return K.lineSvg(K.segment(from, to, P), { tone: "lit" }) + K.dotsSvg([K.iso(from, P)], { size: 0.6, tone: "hi" });
+}
+
+export function drawNeedle(gap, P, K) {
+  const { x, y, top } = SP_GAUGE;
+  const a = (gap / SP_TRAVEL) * Math.PI * 1.6 - Math.PI * 0.8;
+  const tip = [x + 3.4 * Math.sin(a), y - 3.4 * Math.cos(a)];
+  return K.lineSvg(K.lineOnTop([x, y], tip, top + 0.1, P), { tone: "hi", free: "end" }) + K.dotsSvg([K.iso([x, y, top + 0.1], P)], { size: 0.5, tone: "hi" });
 }
 
 export function drawCord(left, P, K) {
