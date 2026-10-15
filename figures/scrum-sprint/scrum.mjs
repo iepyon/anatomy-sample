@@ -18,10 +18,17 @@ export const SP_Z = { gen: 19.5, genTop: 24, arm: 26.5, armTop: 29.5 };
 export const SP_SPOOL_R = 12;
 export const SP_CORD_Z = 31.5;
 export const SP_CAP = (2 * Math.PI * SP_SPOOL_R) / SP_N; // most one sprint can wind: one full index
-export const SP_TRAVEL = SP_CAP * SP_N; // distance from the start to the Product Goal
-export const SP_STOP_X = 22; // face of the Product Goal stop
+export const SP_TRAVEL = SP_CAP * SP_N; // the longest the carriage can travel
+export const SP_GOAL0 = -6; // face of the Product Goal stop when the goal is set
+export const SP_GOAL_MAX = 22; // the furthest the goal can move before it reaches the wheel
+export const SP_STOP_X = SP_GOAL0;
 export const SP_CAR = { w: 40, d: 32, y: 0, z: 4, top: 10 };
-export const SP_X0 = SP_STOP_X - SP_CAR.w - SP_TRAVEL; // carriage left edge at the start
+export const SP_X0 = SP_GOAL_MAX - SP_CAR.w - SP_TRAVEL; // carriage left edge at the start
+export const SP_FACE0 = SP_X0 + SP_CAR.w; // carriage front face at the start
+export const SP_GAP0 = SP_GOAL0 - SP_FACE0; // the gap when the goal is set
+export const SP_SCREW = { y: -5, z: 3.6, r: 1.6, x0: -38, x1: 30 }; // the market's lead screw
+export const SP_KNOB = [-41, -5]; // the market's knob, on the screw's end block
+export const SP_BOX_PORT = [96, -66, 2.5]; // where the feedback line enters the controller
 export const SP_TURN = Math.PI * 2;
 export const SP_ENTRY = (4 * Math.PI) / 3; // into each crank turn, the pin reaches a slot
 export const SP_ANCHOR_X = -110;
@@ -30,13 +37,15 @@ export const SP_SLOTS = 12; // room on the carriage (and tiles in the hopper) fo
 export const SP_BLOCKS = Array.from({ length: SP_SLOTS }, (_, i) => ({ x: 3 + (i % 4) * 7.2, y: 3 + Math.floor(i / 4) * 9, w: 6.2, d: 8, r: 0.7 }));
 export const SP_BLOCK_H = 5;
 export const SP_POST = [36, 16];
-export const SP_TAPE_Z = 16.5;
-export const SP_GAUGE = { x: 27.2, y: 16, r: 4.6, z: 14, top: 19 }; // tape gauge on the goal stop
+export const SP_STOP_Z = [4, 16]; // the goal stop rides on the rails
+export const SP_TAPE_Z = 18.5;
+export const SP_GAUGE = { x: SP_GOAL0 + 5.2, y: 16, r: 4.6, z: 16, top: 21 }; // tape gauge on the goal stop, at rest
 export const SP_TAPE_OUT = SP_GAUGE.x - SP_GAUGE.r; // where the tape leaves its case
 
-// What each sprint delivers: the team's throughput varies (0.62–1.0 of a full index), and
-// the review caps the next increment at the remaining gap the tape measured. Sprints repeat
-// until the gap is zero, so how many it takes comes out of the loop, not out of a plan.
+// A moving target. While each sprint is worked the goal moves (the market shifts it, by less
+// as the product matures), and the team delivers 0.62–1.0 of a full index. At the review the
+// tape measures the gap to where the goal now is, and the increment never exceeds it. Sprints
+// repeat until the gap is zero, so how many it takes comes out of the loop, not out of a plan.
 export function planFor(seed) {
   let x = (seed * 2654435761 + 97) >>> 0;
   const rand = () => {
@@ -44,14 +53,20 @@ export function planFor(seed) {
     return x / 4294967296;
   };
   const deliveries = [];
-  let gap = SP_TRAVEL;
-  while (gap > 1e-9 && deliveries.length < SP_SLOTS) {
+  const goals = [];
+  let face = SP_FACE0;
+  let goal = SP_GOAL0;
+  while (deliveries.length < SP_SLOTS) {
+    const drift = (-5 + 15 * rand()) * Math.pow(0.78, deliveries.length);
+    goal = Math.max(face + 2, Math.min(SP_GOAL_MAX, goal + drift));
     const made = SP_CAP * (0.62 + 0.38 * rand());
-    const step = Math.min(made, gap);
+    const step = Math.min(made, goal - face);
+    goals.push(goal);
     deliveries.push(step);
-    gap -= step;
+    face += step;
+    if (goal - face < 1e-9) break;
   }
-  return { deliveries, n: deliveries.length, goal: SP_TURN * deliveries.length };
+  return { deliveries, goals, n: deliveries.length, goal: SP_TURN * deliveries.length };
 }
 
 const spWrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -156,7 +171,12 @@ export function sprintState(u, plan) {
   let before = 0;
   for (let i = 0; i < j; i++) before += plan.deliveries[i];
   const travel = before + plan.deliveries[j] * frac;
-  return { phi, beta, sprint: j, engaged, frac, travel, gapBefore: SP_TRAVEL - before, gapAfter: SP_TRAVEL - before - plan.deliveries[j], gap: SP_TRAVEL - travel, done: j + (engaged ? frac : 0) };
+  const from = j === 0 ? SP_GOAL0 : plan.goals[j - 1];
+  const to = plan.goals[j];
+  const w = Math.min(1, f / SP_ENTRY);
+  const goalX = from + (to - from) * w * w * (3 - 2 * w);
+  const face = SP_FACE0 + before;
+  return { phi, beta, sprint: j, engaged, frac, travel, goalX, gapBefore: to - face, gapAfter: to - face - plan.deliveries[j], gap: goalX - SP_FACE0 - travel, done: j + (engaged ? frac : 0) };
 }
 
 // A concave plate (slots, relief cuts): its inner walls that face the viewer can sit behind the
@@ -216,17 +236,35 @@ export function drawSpring(left, P, K) {
 }
 
 // The feedback signal: the tape from the gauge case to the carriage post, and the gauge's needle.
-export function drawTape(left, P, K) {
+export function drawTape(left, goalX, P, K) {
   const from = [left + SP_POST[0] + 2.2, SP_POST[1], SP_TAPE_Z];
-  const to = [SP_TAPE_OUT, SP_POST[1], SP_TAPE_Z];
+  const to = [SP_TAPE_OUT + goalX - SP_GOAL0, SP_POST[1], SP_TAPE_Z];
   return K.lineSvg(K.segment(from, to, P), { tone: "lit" }) + K.dotsSvg([K.iso(from, P)], { size: 0.6, tone: "hi" });
 }
 
-export function drawNeedle(gap, P, K) {
-  const { x, y, top } = SP_GAUGE;
-  const a = (gap / SP_TRAVEL) * Math.PI * 1.6 - Math.PI * 0.8;
+export function drawNeedle(gap, goalX, P, K) {
+  const { y, top } = SP_GAUGE;
+  const x = SP_GAUGE.x + goalX - SP_GOAL0;
+  const a = Math.min(1, gap / (SP_GAP0 * 1.4)) * Math.PI * 1.6 - Math.PI * 0.8;
   const tip = [x + 3.4 * Math.sin(a), y - 3.4 * Math.cos(a)];
   return K.lineSvg(K.lineOnTop([x, y], tip, top + 0.1, P), { tone: "hi", free: "end" }) + K.dotsSvg([K.iso([x, y, top + 0.1], P)], { size: 0.5, tone: "hi" });
+}
+
+// The feedback line's run on the floor: from under the gauge's drop, under the wheel, to the controller.
+export function feedbackRoute(goalX) {
+  const gx = SP_GAUGE.x + SP_GAUGE.r + 2.5 + goalX - SP_GOAL0;
+  return [[gx, SP_GAUGE.y, 0.5], [gx, -24, 0.5], [SP_BOX_PORT[0], -24, 0.5], SP_BOX_PORT];
+}
+
+export function drawFloorCable(goalX, P, K) {
+  const route = feedbackRoute(goalX).map((p) => K.iso(p, P));
+  return K.wireSvg(route[0], route[route.length - 1], { via: route.slice(1, -1), tone: "mid", size: 0.8, ends: "to" });
+}
+
+export function drawKnobMark(goalX, P, K) {
+  const [x, y] = SP_KNOB;
+  const a = (goalX - SP_GOAL0) * 0.35;
+  return K.lineSvg(K.lineOnTop([x, y], [x + 3.4 * Math.cos(a), y + 3.4 * Math.sin(a)], 14, P), { tone: "hi", free: "end" }) + K.dotsSvg([K.iso([x, y, 14], P)], { size: 0.5, tone: "hi" });
 }
 
 export function drawCord(left, P, K) {

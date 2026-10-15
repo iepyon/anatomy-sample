@@ -21,7 +21,7 @@ const TILE_H = 1.8;
 const POST_TOP = 30;
 const BOX = { x: 92, y: -80, w: 20, d: 14, r: 1.5 };
 const PEDESTAL = { x: M.SP_G[0] - 18, y: M.SP_G[1] - 18, w: 36, d: 36, r: 3 };
-const RULER = { x: M.SP_X0 + 20 - 5, y: 36, w: M.SP_TRAVEL + 10, d: 7, r: 1 };
+const RULER = { x: M.SP_FACE0 - 5, y: 36, w: M.SP_GOAL_MAX - M.SP_FACE0 + 10, d: 7, r: 1 };
 const RAILS = [3, 24];
 const ANCHOR = { x: M.SP_ANCHOR_X - 6, y: 2, w: 6, d: 28, r: 1.2 };
 const STOP = { x: M.SP_STOP_X, y: 2, w: 7, d: 28, r: 1.2 };
@@ -59,16 +59,16 @@ function plate() {
 // The progress scale: one major tick per sprint, from the start mark to the Product Goal.
 function ruler() {
   const out = [S(k.slabOf(RULER, 0, 0.6, P, 3), { tone: "lo", crease: "none" })];
-  const from = M.SP_X0 + 20;
+  const from = M.SP_FACE0;
+  const step = M.SP_CAP / 4;
   const minor = [];
   const major = [];
-  for (let i = 0; i <= M.SP_N * 4; i++) {
-    const x = from + (M.SP_TRAVEL * i) / (M.SP_N * 4);
+  for (let i = 0; from + i * step <= M.SP_GOAL_MAX + 1e-6; i++) {
+    const x = from + i * step;
     const big = i % 4 === 0;
     (big ? major : minor).push(k.lineOnTop([x, RULER.y], [x, RULER.y + (big ? 3.8 : 2)], 0.6, P));
   }
   out.push(L(minor.join(""), { tone: "lo" }), L(major.join(""), { tone: "mid" }));
-  out.push(L(k.lineOnTop([from + M.SP_TRAVEL, RULER.y], [from + M.SP_TRAVEL, RULER.y + RULER.d], 0.6, P), { tone: "hi" }));
   out.push(D([at([RULER.x + 2, RULER.y + 5.2, 0.6]), at([RULER.x + RULER.w - 2, RULER.y + 5.2, 0.6])], { size: 0.45 }));
   return out.join("");
 }
@@ -143,19 +143,36 @@ function driveUnit() {
   return out.join("");
 }
 
-// The feedback line: from the tape gauge, down past the goal stop and under the wheel, to the controller.
-// The run on the floor is drawn before the pedestal it passes behind; the drop from the gauge after the stop.
-const G_CABLE = (() => {
-  const g = M.SP_GAUGE;
-  return [[g.x + g.r, g.y, g.z + 2], [g.x + g.r + 2.5, g.y, g.z], [g.x + g.r + 2.5, g.y, 0.5], [40, g.y, 0.5], [40, -24, 0.5], [BOX.x + 4, -24, 0.5], [BOX.x + 4, BOX.y + BOX.d, 2.5]];
-})();
-function feedbackFloor() {
-  const route = G_CABLE.slice(2);
-  return k.wireSvg(at(route[0]), at(route[route.length - 1]), { via: route.slice(1, -1).map(at), tone: "mid", size: 0.8, ends: "to" });
-}
+// The drop of the feedback line, from the gauge to the floor beside the goal stop (it rides with the stop).
 function feedbackDrop() {
-  const route = G_CABLE.slice(0, 3);
-  return k.wireSvg(at(route[0]), at(route[2]), { via: [at(route[1])], tone: "mid", size: 0.8, ends: "from" });
+  const g = M.SP_GAUGE;
+  const route = [[g.x + g.r, g.y, g.z + 2], [g.x + g.r + 2.5, g.y, g.z], [g.x + g.r + 2.5, g.y, 0.5]].map(at);
+  return k.wireSvg(route[0], route[2], { via: [route[1]], tone: "mid", size: 0.8, ends: "from" });
+}
+
+// The market: a lead screw behind the rails, turned by a knob, moves the goal stop through its nut.
+function leadScrew() {
+  const { y, z, r, x0, x1 } = M.SP_SCREW;
+  const out = [];
+  const blockL = { x: x0 - 7, y: y - 5, w: 7, d: 10, r: 1 };
+  const blockR = { x: x1, y: y - 5, w: 6, d: 10, r: 1 };
+  out.push(S(k.slabOf(blockL, 0, 9, P, 3, 0.5), { tone: "mid" }));
+  out.push(D([at([blockL.x + 1.8, blockL.y + 1.8, 9]), at([blockL.x + 1.8, blockL.y + blockL.d - 1.8, 9])], { size: 0.4 }));
+  const rod = { x: x0, y: y - r, w: x1 - x0, d: 2 * r, r: r * 0.9 };
+  const threads = [];
+  for (let x = x0 + 1; x < x1 - 0.5; x += 1.4) threads.push(k.lineOnTop([x, y - r * 0.8], [x + 0.9, y + r * 0.8], z + r, P));
+  out.push(S(k.slabOf(rod, z - r, 2 * r, P, 4), { tone: "mid", crease: "none", inner: L(threads.join(""), { tone: "faint" }) }));
+  out.push(S(k.slabOf(blockR, 0, 9, P, 3, 0.5), { tone: "mid" }));
+  out.push(D([at([blockR.x + 3, blockR.y + 2, 9]), at([blockR.x + 3, blockR.y + blockR.d - 2, 9])], { size: 0.4 }));
+  const [kx, ky] = M.SP_KNOB;
+  out.push(S(k.cylinder(kx, ky, 2.4, 9, 1.4, P, 20), { tone: "mid" }));
+  out.push(S(k.cylinder(kx, ky, 5, 10.4, 3.6, P, 36), { tone: "mid", inner: L(k.knurl(kx, ky, 5, 10.6, 13.8, 36, P, 0.3), { tone: "lo" }) }));
+  return out.join("");
+}
+
+function nut() {
+  const nutPlan = { x: STOP.x + 1, y: M.SP_SCREW.y - 4, w: 5, d: STOP.y - M.SP_SCREW.y + 4, r: 0.8 };
+  return S(k.slabOf(nutPlan, 0.6, M.SP_STOP_Z[0] + 4 - 0.6, P, 3, 0.4), { tone: "mid" }) + D([at([nutPlan.x + 2.5, nutPlan.y + 1.6, M.SP_STOP_Z[0] + 4])], { size: 0.4 });
 }
 
 function hub() {
@@ -178,26 +195,33 @@ function pedestal() {
 function rails() {
   const out = [];
   for (const y of RAILS) {
-    out.push(S(k.slabOf({ x: M.SP_ANCHOR_X, y, w: M.SP_STOP_X - M.SP_ANCHOR_X, d: 5, r: 1 }, 0, M.SP_CAR.z, P, 3, 0.4), { tone: "mid" }));
-    out.push(D([M.SP_ANCHOR_X + 6, M.SP_STOP_X - 6].map((x) => at([x, y + 2.5, M.SP_CAR.z])), { size: 0.4 }));
+    const end = M.SP_GOAL_MAX + STOP.w + 2;
+    out.push(S(k.slabOf({ x: M.SP_ANCHOR_X, y, w: end - M.SP_ANCHOR_X, d: 5, r: 1 }, 0, M.SP_CAR.z, P, 3, 0.4), { tone: "mid" }));
+    out.push(D([M.SP_ANCHOR_X + 6, end - 3].map((x) => at([x, y + 2.5, M.SP_CAR.z])), { size: 0.4 }));
   }
   out.push(S(k.slabOf(ANCHOR, 0, 14, P, 3, 0.5), { tone: "mid" }));
   out.push(D([at([ANCHOR.x + 3, ANCHOR.y + 4, 14]), at([ANCHOR.x + 3, ANCHOR.y + ANCHOR.d - 4, 14])], { size: 0.45 }));
   return out.join("");
 }
 
-// The Product Goal: a hard stop the carriage reaches after the sixth sprint.
+// The Product Goal: a stop on the rails that the market moves. It carries the tape gauge, so
+// the tape always measures the gap to where the goal is now.
 function goalStop() {
-  const out = [S(k.slabOf(STOP, 0, 14, P, 3, 0.5), { tone: "mid", inner: L(k.sideSeam(STOP, 4, P, 3), { tone: "faint" }) })];
-  out.push(L(k.planOutline(k.insetPlan(STOP, 1.4), 14, P, 3), { tone: "faint" }));
-  out.push(D([at([STOP.x + 3.5, STOP.y + 3.2, 14]), at([STOP.x + 3.5, STOP.y + STOP.d - 3.2, 14])], { size: 0.45 }));
-  out.push(k.faceTextSvg(k.topMatrix([STOP.x + 4.6, STOP.y + 6.4], 14, P, "y"), "ゴール", { size: 3, tone: "mid", anchor: "middle" }));
+  const [z0, z1] = M.SP_STOP_Z;
+  const out = [];
+  out.push(S(k.slabOf({ x: STOP.x + 2, y: STOP.y + STOP.d - 1, w: 2.4, d: 7.6, r: 0.5 }, z0 + 0.2, 1.2, P, 2), { tone: "mid", crease: "none" }));
+  out.push(L(k.lineOnTop([STOP.x + 3.2, STOP.y + STOP.d], [STOP.x + 3.2, STOP.y + STOP.d + 6.4], z0 + 1.4, P), { tone: "hi", free: "end" }));
+  out.push(S(k.slabOf(STOP, z0, z1 - z0, P, 3, 0.5), { tone: "mid", inner: L(k.sideSeam(STOP, z0 + 3, P, 3), { tone: "faint" }) }));
+  out.push(L(k.planOutline(k.insetPlan(STOP, 1.4), z1, P, 3), { tone: "faint" }));
+  out.push(D([at([STOP.x + 3.5, STOP.y + 3.2, z1]), at([STOP.x + 3.5, STOP.y + STOP.d - 3.2, z1])], { size: 0.45 }));
+  out.push(k.faceTextSvg(k.topMatrix([STOP.x + 4.6, STOP.y + 6.4], z1, P, "y"), "ゴール", { size: 3, tone: "mid", anchor: "middle" }));
   const g = M.SP_GAUGE;
   out.push(S(k.cylinder(g.x, g.y, g.r, g.z, g.top - g.z, P, 40, 0.4), { tone: "hi", crease: "lo", inner: L(k.sideArc(g.x, g.y, g.r, g.z + 1.6, P, 24), { tone: "faint" }) }));
   out.push(L(k.ring(g.x, g.y, g.r - 0.9, g.top, P, 40), { tone: "lo" }));
   const t = k.radialTicks(g.x, g.y, g.r - 1.1, 16, 4, g.top, [0.6, 1.1], P, -Math.PI * 0.8, Math.PI * 1.6);
   out.push(L(t.minor, { tone: "lo" }), L(t.major, { tone: "mid" }));
   out.push(S(k.slabOf({ x: M.SP_TAPE_OUT - 0.6, y: g.y - 1.6, w: 1.4, d: 3.2, r: 0.4 }, M.SP_TAPE_Z - 1.2, 2.4, P, 2), { tone: "mid", crease: "none" }));
+  out.push(feedbackDrop());
   return out.join("");
 }
 
@@ -207,8 +231,8 @@ function carriage() {
   const plan = { x: x0, y: M.SP_CAR.y, w: M.SP_CAR.w, d: M.SP_CAR.d, r: 3 };
   const top = M.SP_CAR.top;
   const out = [`<path class="iso-halo" d="${k.haloOf(k.insetPlan(plan, 3), M.SP_CAR.z, 0.1, P)}" style="filter:blur(4px)"/>`];
-  out.push(S(k.slabOf({ x: x0 + 18.6, y: plan.y + plan.d - 1, w: 2.8, d: 8, r: 0.6 }, M.SP_CAR.z + 0.2, 1.2, P, 2), { tone: "mid", crease: "none" }));
-  out.push(L(k.lineOnTop([x0 + 20, plan.y + plan.d], [x0 + 20, plan.y + plan.d + 6.6], M.SP_CAR.z + 1.4, P), { tone: "hi", free: "end" }));
+  out.push(S(k.slabOf({ x: x0 + 37.2, y: plan.y + plan.d - 1, w: 2.8, d: 8, r: 0.6 }, M.SP_CAR.z + 0.2, 1.2, P, 2), { tone: "mid", crease: "none" }));
+  out.push(L(k.lineOnTop([x0 + 38.6, plan.y + plan.d], [x0 + 38.6, plan.y + plan.d + 6.6], M.SP_CAR.z + 1.4, P), { tone: "hi", free: "end" }));
   out.push(S(k.slabOf(plan, M.SP_CAR.z, top - M.SP_CAR.z, P, 5, 0.6), { tone: "mid", inner: L(k.sideSeam(plan, 6.4, P, 5), { tone: "faint" }) }));
   const items = [];
   M.SP_BLOCKS.forEach((block, index) => {
@@ -244,13 +268,13 @@ function spool() {
   return out.join("");
 }
 
-const start = M.sprintState(0, M.planFor(1));
+const start = M.sprintState(0, M.planFor(5));
 const live0 = (name, svg) => `<g data-part="${name}">${svg}</g>`;
 const svg = k.figureSvg({
   width: WIDTH,
   height: HEIGHT,
   label:
-    "スクラムをゴールまでのフィードバックループとして表した図。ゴールのストッパーに付いた巻尺ゲージが、キャリッジまでの残りの距離を測る。その値はケーブルで制御箱に送られ、制御箱はモーターを回す。クランクの1回転が1スプリントで、終わりにゼネバ車が1コマ送られる。滑りクラッチ付きの糸巻きは、そのスプリントで実際にできた分だけ、残りの距離を超えない範囲で糸を巻き取る。巻尺が0になるまでスプリントを重ねる。",
+    "スクラムを、動くゴールを追うフィードバックループとして表した図。ゴールのストッパーは送りねじで前後に動く。ゴールのストッパーに付いた巻尺ゲージが、キャリッジまでの残りの距離を測る。その値はケーブルで制御箱に送られ、制御箱はモーターを回す。クランクの1回転が1スプリントで、終わりにゼネバ車が1コマ送られる。滑りクラッチ付きの糸巻きは、そのスプリントで実際にできた分だけ、残りの距離を超えない範囲で糸を巻き取る。巻尺が0になるまでスプリントを重ねる。",
   body: [
     plate(),
     ruler(),
@@ -261,15 +285,17 @@ const svg = k.figureSvg({
     driveUnit(),
     live0("lock", M.drawLock(start.phi, P, K)),
     hub(),
-    feedbackFloor(),
+    live0("floor", M.drawFloorCable(M.SP_GOAL0, P, K)),
     pedestal(),
+    leadScrew(),
+    live0("knob", M.drawKnobMark(M.SP_GOAL0, P, K)),
+    `<g data-part="nut">${nut()}</g>`,
     rails(),
     live0("spring", M.drawSpring(M.SP_X0, P, K)),
     `<g data-part="carriage">${carriage()}</g>`,
-    goalStop(),
-    feedbackDrop(),
-    live0("tape", M.drawTape(M.SP_X0, P, K)),
-    live0("needle", M.drawNeedle(M.SP_TRAVEL, P, K)),
+    `<g data-part="stop">${goalStop()}</g>`,
+    live0("tape", M.drawTape(M.SP_X0, M.SP_GOAL0, P, K)),
+    live0("needle", M.drawNeedle(M.SP_GAP0, M.SP_GOAL0, P, K)),
     live0("geneva", M.drawGeneva(start.beta, P, K)),
     live0("arm", M.drawArm(start.phi, P, K)),
     spool(),
@@ -283,11 +309,12 @@ const shared = readFileSync(join(HERE, "scrum.mjs"), "utf8").replace(/^export /g
 const live = `
 ${shared}
 const P = ${JSON.stringify(P)};
-const K = { solidSvg, extrude, cylinder, lineSvg, ring, dotsSvg, iso, lineOnTop, coil, segment, onTop };
+const K = { solidSvg, extrude, cylinder, lineSvg, ring, dotsSvg, iso, lineOnTop, coil, segment, onTop, wireSvg };
 const stage = document.querySelector(".iso-stage");
 const svg = stage.querySelector("svg");
 const part = (name) => svg.querySelector('[data-part="' + name + '"]');
 const lock = part("lock"), geneva = part("geneva"), arm = part("arm"), mark = part("mark"), spring = part("spring"), cord = part("cord"), tape = part("tape"), needle = part("needle"), carriage = part("carriage");
+const stop = part("stop"), nut = part("nut"), floor = part("floor"), knob = part("knob");
 const blocks = [...svg.querySelectorAll("[data-block]")].sort((a, b) => a.dataset.block - b.dataset.block);
 const tiles = [...svg.querySelectorAll("[data-tile]")].sort((a, b) => a.dataset.tile - b.dataset.tile);
 const readout = document.querySelector("[data-readout]");
@@ -297,22 +324,25 @@ const HOLD = 3.2;
 const BACK = 1.9;
 const ease = (t) => t * t * (3 - 2 * t);
 const clamp01 = (t) => Math.max(0, Math.min(1, t));
-const pct = (gap) => Math.round((gap / SP_TRAVEL) * 100);
-let seed = 1, plan = planFor(seed), betaBase = 0, travelEnd = 0;
+const pct = (gap) => Math.max(0, Math.round((gap / SP_GAP0) * 100));
+let seed = 5, plan = planFor(seed), betaBase = 0, travelEnd = 0, goalEnd = SP_GOAL0;
 let u = 0, phase = "run", hold = 0, back = 0, speed = 1, fast = false, paused = false;
 let frame = 0, last = 0, visible = false;
-let shown = { phi: null, beta: null, travel: null };
+let shown = { phi: null, beta: null, travel: null, goalX: null };
 function sayText(st) {
-  if (phase === "goal") return "残り 0% · ゴール到達（" + plan.n + "スプリント）";
+  if (phase === "goal") return "残り 0% · 動くゴールに到達（" + plan.n + "スプリント）";
   if (phase === "back") return "次のプロダクトゴールを設定";
   const n = st.sprint + 1;
   if (st.engaged) return "スプリント " + n + " · レビュー · 残り " + pct(st.gapBefore) + "% → " + pct(st.gapAfter) + "%";
-  return "スプリント " + n + " · 開発中 · 残り " + pct(st.gapBefore) + "%";
+  const moved = st.goalX - (st.sprint === 0 ? SP_GOAL0 : plan.goals[st.sprint - 1]);
+  const drift = Math.abs(moved) < 0.5 ? "" : moved > 0 ? " · ゴールが遠のく" : " · ゴールが近づく";
+  return "スプリント " + n + " · 開発中 · 残り " + pct(st.gap) + "%" + drift;
 }
 function draw() {
   const st = sprintState(u, plan);
   const r = phase === "back" ? ease(clamp01(back)) : 0;
   const travel = phase === "back" ? travelEnd * (1 - r) : st.travel;
+  const goalX = phase === "back" ? goalEnd + (SP_GOAL0 - goalEnd) * r : st.goalX;
   const done = phase === "back" ? plan.n : st.done;
   const beta = betaBase + st.beta;
   if (st.phi !== shown.phi) { lock.innerHTML = drawLock(st.phi, P, K); arm.innerHTML = drawArm(st.phi, P, K); }
@@ -321,11 +351,20 @@ function draw() {
     carriage.setAttribute("transform", translateAlong(P, [travel, 0, 0]));
     spring.innerHTML = drawSpring(SP_X0 + travel, P, K);
     cord.innerHTML = drawCord(SP_X0 + travel, P, K);
-    tape.innerHTML = drawTape(SP_X0 + travel, P, K);
-    needle.innerHTML = drawNeedle(SP_TRAVEL - travel, P, K);
     mark.innerHTML = drawSpoolMark(-travel / SP_SPOOL_R, P, K);
   }
-  shown = { phi: st.phi, beta, travel };
+  if (goalX !== shown.goalX) {
+    const by = translateAlong(P, [goalX - SP_GOAL0, 0, 0]);
+    stop.setAttribute("transform", by);
+    nut.setAttribute("transform", by);
+    floor.innerHTML = drawFloorCable(goalX, P, K);
+    knob.innerHTML = drawKnobMark(goalX, P, K);
+  }
+  if (travel !== shown.travel || goalX !== shown.goalX) {
+    tape.innerHTML = drawTape(SP_X0 + travel, goalX, P, K);
+    needle.innerHTML = drawNeedle(goalX - SP_FACE0 - travel, goalX, P, K);
+  }
+  shown = { phi: st.phi, beta, travel, goalX };
   blocks.forEach((el, i) => {
     const e = ease(clamp01(done - i)) * (1 - r);
     el.setAttribute("opacity", e.toFixed(3));
@@ -338,7 +377,7 @@ function draw() {
   });
   const text = sayText(st);
   if (readout.textContent !== text) readout.textContent = text;
-  stage.setAttribute("aria-valuenow", String(pct(SP_TRAVEL - travel)));
+  stage.setAttribute("aria-valuenow", String(pct(goalX - SP_FACE0 - travel)));
   stage.setAttribute("aria-valuetext", text);
 }
 function tick(now) {
@@ -347,7 +386,7 @@ function tick(now) {
   speed += ((fast ? 3.2 : 1) - speed) * (1 - Math.exp(-dt / 0.35));
   const step = paused ? 0 : dt * speed;
   if (phase === "run") { u += (step * SP_TURN) / CYCLE; if (u >= plan.goal) { u = plan.goal; phase = "goal"; hold = 0; } }
-  else if (phase === "goal") { hold += step; if (hold >= HOLD) { phase = "back"; back = 0; travelEnd = sprintState(u, plan).travel; } }
+  else if (phase === "goal") { hold += step; if (hold >= HOLD) { phase = "back"; back = 0; const end = sprintState(u, plan); travelEnd = end.travel; goalEnd = end.goalX; } }
   else {
     back += step / BACK;
     if (back >= 1) { betaBase += sprintState(plan.goal, plan).beta; seed += 1; plan = planFor(seed); phase = "run"; u = 0; }
@@ -372,20 +411,20 @@ draw();
 
 const body = k.plateHtml({
   fig: "Fig 1",
-  title: "ゴールへのフィードバックループ",
+  title: "動くゴールを追うフィードバックループ",
   hint: "ホバーで早送り · Spaceで一時停止",
   readout: "スプリント 1 · 開発中 · 残り 100%",
   keys: [
-    { mark: "lit", label: "巻尺：ゴールまでの残り（スプリントごとに測るフィードバック信号）" },
+    { mark: "lit", label: "巻尺：いまのゴールまでの残り（スプリントごとに測るフィードバック信号）" },
     { mark: "raised", label: "ブロック：各スプリントで完成したインクリメント" },
     { mark: "flat", label: "ホッパーの板：プロダクトバックログの項目" },
-    { mark: "edge", label: "クランク1回転＝1スプリント（固定長のタイムボックス）" },
+    { mark: "edge", label: "送りねじ：市場の変化でゴールが前後に動く" },
   ],
   caption:
-    "ゴールが先にあり、スプリントの数は先に決めない。ゴールのストッパーに付いた巻尺ゲージがキャリッジまでの残りを測り、その値はケーブルで制御箱に送られ、制御箱からモーターへとつながって、輪が一周する。モーターはクランクを一定の速さで回し、1回転が1スプリントにあたる。回転の3分の2はゼネバ車がロックされて動かない（開発期間）。最後の3分の1でピンが溝に入り、車を1コマ送る（スプリントレビュー）。車の上の糸巻きには滑りクラッチがあり、そのスプリントで実際にできた分だけを巻き取ってすべる。1回で巻ける量には上限があり、巻尺が測った残りも超えない。できる量はスプリントごとに上限の6〜10割で揺れるので、残りは毎回測り直す。巻尺が0を指すまでこれを繰り返す。この図では8〜9スプリントで届く。届くと戻しばねがキャリッジを戻し、次のゴールで同じ輪がまた回る。",
+    "ゴールは止まっていない。後ろの送りねじが市場の変化を表し、開発期間のあいだにゴールのストッパーを前後に動かす。動く量は、プロダクトが成熟するにつれて小さくなる。巻尺ゲージはストッパーに付いているので、測るのはいつも「いま」のゴールまでの残りになる。その値はケーブルで制御箱に送られ、モーターへとつながって輪が一周する。クランクの1回転が1スプリントで、終わりにゼネバ車が1コマ送られる（スプリントレビュー）。滑りクラッチ付きの糸巻きは、そのスプリントで実際にできた分だけを巻き取る。巻き取る量は、レビューで測った残りを超えない。だから計画ではなく測定がキャリッジを導き、巻尺が0を指したときが、動く的を捉えたときになる。目盛りの2本の指針（キャリッジとゴール）の間隔が残りで、この図では5〜9スプリントで届く。届くと次のゴールが設定され、同じ輪がまた回る。",
   body: `<div class="iso-stage" tabindex="0" role="meter" aria-label="ゴールへのフィードバックループ：ゴールまでの残り（%）" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">${svg}</div>`,
 });
 
 const file = theme === "light" ? "scrum-sprint-light.html" : "scrum-sprint.html";
-writeFileSync(join(HERE, file), k.pageHtml({ title: "ゴールへのフィードバックループ", theme, body, script: kitScript() + live }).replace('<html lang="en">', '<html lang="ja">'));
+writeFileSync(join(HERE, file), k.pageHtml({ title: "動くゴールを追うフィードバックループ", theme, body, script: kitScript() + live }).replace('<html lang="en">', '<html lang="ja">'));
 console.log("wrote", file);
