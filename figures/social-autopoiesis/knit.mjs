@@ -21,7 +21,9 @@ export const KN_GATE = { z: 124, top: 130, rIn: 42.4, rOut: 46.6, half: 22, shut
 export const KN_FAB = { r: 15.5, top: 62, bottom: 12, row: 3 };
 export const KN_TUB = { r: 26, top: 12 };
 export const KN_CARD = { a: 315, r0: 47, pitch: 7.6, count: 5, w: 6.4, d: 13, z: 60.6 };
-export const KN_MISS_DROP = 2; // rounds a needle may miss before its loop runs
+export const KN_MISS_DROP = 2;
+export const KN_HUE = ["blue", "green"]; // the person's yarn, the AI yarns: the one place colour is the subject
+export const knHue = (k) => (k === 0 ? KN_HUE[0] : KN_HUE[1]); // rounds a needle may miss before its loop runs
 
 const DEG = Math.PI / 180;
 export const knPolar = (deg, r) => [Math.cos(deg * DEG) * r, Math.sin(deg * DEG) * r];
@@ -140,7 +142,7 @@ export function knYarns(camDeg, feeds, open, take, P, K) {
     if (!on) return;
     const [gx, gy] = knGuide(k);
     const [sx, sy] = knSpool(k);
-    const tone = k === 0 ? "hi" : "lo";
+    const tone = knHue(k);
     if (open[k] > 0.5) out.push(K.lineSvg(K.segment([gx, gy, KN_GATE.top], eye, P), { tone }) + K.dotsSvg([K.iso([gx, gy, KN_GATE.top], P)], { size: 0.5, tone: "lo" }));
   });
   if (take >= 0) {
@@ -161,7 +163,7 @@ export function knYarnsIn(feeds, P, K) {
       if (!on) return "";
       const [gx, gy] = knGuide(k);
       const [sx, sy] = knSpool(k);
-      return K.lineSvg(K.segment([sx, sy, KN_SPOOL_Z + 10], [gx, gy, KN_GATE.z + 2], P), { tone: k === 0 ? "hi" : "lo" });
+      return K.lineSvg(K.segment([sx, sy, KN_SPOOL_Z + 10], [gx, gy, KN_GATE.z + 2], P), { tone: knHue(k) });
     })
     .join("");
 }
@@ -182,7 +184,7 @@ export function knGate(open, P, K) {
     const off = t + 2.4 + open[k] * g.shut;
     const ring = [along(a, KN_MAST.r + 2.2, off - 1.4), along(a, KN_MAST.r + 4.8, off - 1.4), along(a, KN_MAST.r + 4.8, off + 1.4), along(a, KN_MAST.r + 2.2, off + 1.4)];
     const [cx, cy] = along(a, KN_MAST.r + 3.5, off);
-    return { depth: cx + cy, svg: K.solidSvg(K.extrude(ring, g.top, 0.9, P), { tone: k === 0 ? "hi" : "mid", crease: "none" }) + K.dotsSvg([K.iso([cx, cy, g.top + 0.9], P)], { size: 0.4, tone: "lo" }) };
+    return { depth: cx + cy, svg: K.solidSvg(K.extrude(ring, g.top, 0.9, P), { tone: "mid", crease: "none" }) + K.lineSvg(K.ring(cx, cy, 0.7, g.top + 0.9, P, 10), { tone: knHue(k) }) };
   });
   shutters.sort((p, q) => p.depth - q.depth).forEach((sh) => out.push(sh.svg));
   return out.join("");
@@ -199,7 +201,7 @@ export function knSnippets(list, P, K) {
       const y = y0 + Math.sin(s.tilt) * t * 3;
       const z = z0 - t * t * 12;
       const d = K.segment([x, y, z], [x + Math.cos(s.tilt) * 1.6, y + Math.sin(s.tilt) * 1.6, z - 2.2], P);
-      return `<g opacity="${(1 - t).toFixed(2)}">${K.lineSvg(d, { tone: "lo", free: true })}</g>`;
+      return `<g opacity="${(1 - t).toFixed(2)}">${K.lineSvg(d, { tone: s.tone || "lo", free: true })}</g>`;
     })
     .join("");
 }
@@ -232,8 +234,8 @@ export function knFabric(rows, phase, P, K) {
     });
   }
   out.push(K.lineSvg(arcs.join(""), { tone: "faint" }));
-  out.push(K.lineSvg(aMarks.join(""), { tone: "lo" }));
-  out.push(K.lineSvg(hMarks.join(""), { tone: "hi" }));
+  out.push(K.lineSvg(aMarks.join(""), { tone: KN_HUE[1] }));
+  out.push(K.lineSvg(hMarks.join(""), { tone: KN_HUE[0] }));
   if (ladders.length) out.push(K.lineSvg(ladders.join(""), { tone: "hi" }));
   return out.join("");
 }
@@ -258,7 +260,7 @@ export function knCards(cards, shift, P, K) {
       if (g === "H") dots.push(K.iso([x, y, c.z + 0.7], P));
       else rings.push(K.ring(x, y, 0.75, c.z + 0.7, P, 10));
     });
-    svg.push(K.dotsSvg(dots, { size: 0.65, tone: "hi" }), K.lineSvg(rings.join(""), { tone: "lo" }));
+    svg.push(`<g class="kn-dot" data-hue="${KN_HUE[0]}">${K.dotsSvg(dots, { size: 0.65, tone: "hi" })}</g>`, K.lineSvg(rings.join(""), { tone: KN_HUE[1] }));
     items.push({ r, svg: svg.join("") });
   });
   // Far cards first: the track runs toward the back-right, so a larger r is further away.

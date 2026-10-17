@@ -10,18 +10,18 @@ const theme = process.argv.includes("--light") ? "light" : "dark";
 
 const WIDTH = 640;
 const HEIGHT = 480;
-const PLATE = { x: -74, y: -74, w: 148, d: 148, r: 9 };
+const PLATE = { x: -62, y: -62, w: 124, d: 124, r: 9 };
 const PLATE_H = 10;
 const FOOT_H = 5;
 const LEG_R = 36;
 const BED = { r: 42, z: 58, top: 62 };
-const LABEL = { x: -64, y: 46, w: 32, d: 13, r: 1.2 };
+const LABEL = { x: -54, y: 38, w: 28, d: 12, r: 1.2 };
 
 const P = k.fitProjection(
   [...k.boxCorners(PLATE, -PLATE_H - FOOT_H, 0), [0, 0, M.KN_MAST.top + 6], [...M.knGuide(0).slice(0, 2), M.KN_MAST.top + 2], [...M.knGuide(3).slice(0, 2), M.KN_MAST.top + 2]],
   WIDTH,
   HEIGHT,
-  { pad: 24, azimuth: 45, elevation: 30 },
+  { pad: 18, azimuth: 45, elevation: 30 },
 );
 
 const at = (point) => k.iso(point, P);
@@ -122,7 +122,7 @@ function mast() {
     const r = i === 0 ? 5 : 3.4;
     const z = M.KN_SPOOL_Z;
     out.push(S(k.cylinder(sx, sy, r + 1.2, z, 1, P, 24), { tone: "mid" }));
-    out.push(S(k.cylinder(sx, sy, r, z + 1, 8, P, 28), { tone: i === 0 ? "hi" : "mid", crease: "none", inner: L([2.6, 4.2, 5.8, 7.4].map((h) => k.sideArc(sx, sy, r, z + h, P, 16)).join(""), { tone: "faint" }) }));
+    out.push(S(k.cylinder(sx, sy, r, z + 1, 8, P, 28), { tone: "mid", crease: "none", inner: L([2.6, 4.2, 5.8, 7.4].map((h) => k.sideArc(sx, sy, r, z + h, P, 16)).join(""), { tone: M.knHue(i) }) }));
     out.push(S(k.cylinder(sx, sy, r + 1.2, z + 9, 1, P, 24), { tone: "mid" }));
     out.push(D([at([sx, sy, z + 10])], { size: 0.45, tone: "lo" }));
   });
@@ -246,17 +246,17 @@ function stitch(i) {
   const need = cards[0][Math.floor(i / 3)];
   const deg = knNeedleDeg(i);
   const [ex, ey] = knPolar(cam, KN_EYE.r);
-  const cutAt = (at) => snips.push({ at, tilt: rand() * Math.PI * 2, t: 0 });
+  const cutAt = (at, tone) => snips.push({ at, tone, tilt: rand() * Math.PI * 2, t: 0 });
   offered += 3;
   if (need === "H") {
     // The boundary is shut to the AI yarns: all three stop outside the gate.
-    for (let k = 1; k < 4; k++) { const [gx, gy] = knGuide(k); cutAt([gx, gy, KN_GATE.z - 1]); }
+    for (let k = 1; k < 4; k++) { const [gx, gy] = knGuide(k); cutAt([gx, gy, KN_GATE.z - 1], KN_HUE[1]); }
     gateCut += 3;
     if (feeds[0]) { current[i] = "H"; misses[i] = 0; conn++; take = 0; }
     else { current[i] = "x"; misses[i]++; take = -1; if (misses[i] >= KN_MISS_DROP && !stopped) { stopped = true; droppedAt = i; } }
   } else {
     // The boundary is open to the AI yarns: all three come in, the stitch takes one.
-    for (let c = 0; c < 2; c++) cutAt([ex, ey, KN_EYE.z]);
+    for (let c = 0; c < 2; c++) cutAt([ex, ey, KN_EYE.z], KN_HUE[1]);
     eyeCut += 2;
     current[i] = "A"; misses[i] = 0; conn++; aiConn++; take = 1;
   }
@@ -342,13 +342,15 @@ const body = k.plateHtml({
     { mark: "lit", label: "① 決定：いま生まれている一目。次の段に引き抜かれて初めて留まる" },
     { mark: "raised", label: "② 決定前提：型紙カード。編み上がった段から打ち抜かれる" },
     { mark: "edge", label: "③ 境界：マスト上の糸のゲート。カードが口の開け閉めを決める" },
-    { mark: "flat", label: "糸：外から差し出される伝達の候補。太いのは人、細いのはAIを宛先とする糸で、意識の有無の区別ではない" },
+    { mark: "blue", label: "青：人を宛先とする糸と目" },
+    { mark: "green", label: "緑：AIを宛先とする糸と目。宛先の区別で、意識の有無の区別ではない" },
   ],
   caption:
     "この機械は三つの項の輪だけで回る。① 決定（編み目）が ② 決定前提（型紙カード）を作り、② が ③ 境界（糸のゲート）を開け閉めし、③ を通った糸だけが ① の新しい目になる。決定を産出する機構（ゲート）は、カードを介して決定自身が作っている。外から機構を据え付ける者はいない。カムが針を一本持ち上げた瞬間に一目が生まれ、すぐに過去になる。その目が理解されたかどうかは、次の段の輪がそこを引き抜いたときにだけ分かる。理解は合意ではなく、接続の結果で、芯にあるのは「どの糸が来るか分からない」という二重の偶発性のほうだ。人とAIは輪の外にいて、糸巻きから糸を差し出すだけ。機械が区別するのは意識の有無ではなく、どの宛先の糸かという点だけ。カードが人の糸を求める組では、ゲートはAIの口を閉じ、AIの三本は境界の外で切れる。AIの糸を許す組では三本とも中に入り、針が一本を取って残りは中で切れる。カードは編み上がった段から打ち抜かれ、四段あとにゲートを動かす。人の糸で二段続けて留まった組はAIへ任され、AIが三段続けた組は人へ戻る。クリックで人の糸を止めると、人を要する目が編めずに目が落ち、輪が途切れて機械は止まる。編み地は輪が回った跡として桶にたまる。コードがそうであるように、産出物ではなく、次の目をつなぐための媒体と記憶だ。",
   body: `<div class="iso-stage" tabindex="0" role="img" aria-label="接続で自分を産出する社会システム">${svg}</div>`,
 });
 
+const PAGE_CSS = `<style>.kn-dot[data-hue="blue"] circle{fill:var(--anatomy-blue);opacity:1}.kn-dot[data-hue="green"] circle{fill:var(--anatomy-green);opacity:1}</style>`;
 const file = theme === "light" ? "social-autopoiesis-light.html" : "social-autopoiesis.html";
-writeFileSync(join(HERE, file), k.pageHtml({ title: "接続で自分を産出する社会システム", theme, body, script: kitScript() + live }).replace('<html lang="en">', '<html lang="ja">'));
+writeFileSync(join(HERE, file), k.pageHtml({ title: "接続で自分を産出する社会システム", theme, body: PAGE_CSS + body, script: kitScript() + live }).replace('<html lang="en">', '<html lang="ja">'));
 console.log("wrote", file);
