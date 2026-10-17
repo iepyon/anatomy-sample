@@ -12,11 +12,12 @@ export const KN_GROUPS = 8; // pattern groups on a card, three needles each
 export const KN_CYL = { r: 22, z: 62, top: 84, hole: 16.5 };
 export const KN_NEEDLE_R = 22.4;
 export const KN_LIFT = 8; // how far the cam raises a needle above the cylinder top
-export const KN_CAR = { rIn: 23.4, rOut: 31, z: 66, top: 78, half: 28 }; // the cam carriage (degrees)
+export const KN_CAR = { rIn: 22.7, rOut: 31, z: 66, top: 78, half: 28 }; // the cam carriage (degrees)
 export const KN_EYE = { r: 24.6, z: 95 }; // the feeder eye on the carriage
 export const KN_MAST = { a: 225, r: 41, top: 130 };
 export const KN_FEEDS = [-13, -4.5, 4, 12.5]; // tangential offsets of the guide eyes and spools: person, AI ×3
 export const KN_SPOOL_Z = 98;
+export const KN_GATE = { z: 124, top: 130, rIn: 42.4, rOut: 46.6, half: 22, shut: 2.8 }; // the yarn gate: the boundary
 export const KN_FAB = { r: 15.5, top: 62, bottom: 12, row: 3 };
 export const KN_TUB = { r: 26, top: 12 };
 export const KN_CARD = { a: 315, r0: 47, pitch: 7.6, count: 5, w: 6.4, d: 13, z: 60.6 };
@@ -31,8 +32,8 @@ const along = (a, r, t) => {
   const [x, y] = knPolar(a, r);
   return [x - Math.sin(a * DEG) * t, y + Math.cos(a * DEG) * t];
 };
-export const knGuide = (k) => [...along(KN_MAST.a, KN_MAST.r + 3, KN_FEEDS[k]), KN_MAST.top];
-export const knSpool = (k) => along(KN_MAST.a, KN_MAST.r + 3, KN_FEEDS[k]);
+export const knGuide = (k) => [...along(KN_MAST.a, KN_MAST.r + 3.5, KN_FEEDS[k]), KN_MAST.top];
+export const knSpool = (k) => along(KN_MAST.a, KN_MAST.r + 3.5, KN_FEEDS[k]);
 
 // The pattern a card carries: one of "H" (a person's yarn) or "A" (an AI's yarn) per group.
 // The next card is punched from the round just knitted: a group that has held on a person's yarn
@@ -102,6 +103,7 @@ export function knCarriage(a, P, K) {
 // needle the cam has raised over it.
 export function knNeedles(camDeg, litIndex, P, K, part, from = KN_CYL.top) {
   const lines = [];
+  const hooks = [];
   let lit = "";
   for (let i = 0; i < KN_N; i++) {
     const deg = knNeedleDeg(i);
@@ -118,40 +120,84 @@ export function knNeedles(camDeg, litIndex, P, K, part, from = KN_CYL.top) {
     }
     const d = K.segment([x, y, z0], [x, y, tip], P);
     if (i === litIndex && lift > 1) lit = K.lineSvg(d, { tone: "lit" }).replace("<path ", '<path style="stroke-width:1.3" ') + K.dotsSvg([K.iso([x, y, tip], P)], { size: 0.8, tone: "hi" });
-    else lines.push(d);
+    else {
+      lines.push(d);
+      if (part !== "front" || lift > 0.3) hooks.push(K.iso([x, y, tip], P));
+    }
   }
-  return K.lineSvg(lines.join(""), { tone: "mid" }) + lit;
+  return K.lineSvg(lines.join(""), { tone: "mid" }) + K.dotsSvg(hooks, { size: 0.45, tone: "mid" }) + lit;
 }
 
-// The yarns: from each spool up to its guide eye, then down to the feeder eye on the carriage.
-// The yarn that the stitch takes runs on from the eye to the needle at the cam (lit).
-export function knYarns(camDeg, feeds, take, P, K) {
+// The yarns: from each spool up into its gate slot. Through an open slot a yarn runs on down to the
+// feeder eye on the carriage; at a closed slot it stops outside. The yarn the stitch takes runs on
+// from the eye to the needle at the cam (lit).
+export function knYarns(camDeg, feeds, open, take, P, K) {
   const [ex, ey] = knPolar(camDeg, KN_EYE.r);
   const eye = [ex, ey, KN_EYE.z + 1];
   const out = [];
+  const ends = [];
   feeds.forEach((on, k) => {
     if (!on) return;
-    const g = knGuide(k);
+    const [gx, gy] = knGuide(k);
     const [sx, sy] = knSpool(k);
     const tone = k === 0 ? "hi" : "lo";
-    out.push(K.lineSvg(K.segment([sx, sy, KN_SPOOL_Z + 10], g, P) + K.segment(g, eye, P), { tone }));
+    if (open[k] > 0.5) out.push(K.lineSvg(K.segment([gx, gy, KN_GATE.top], eye, P), { tone }) + K.dotsSvg([K.iso([gx, gy, KN_GATE.top], P)], { size: 0.5, tone: "lo" }));
   });
   if (take >= 0) {
     const i = Math.round(camDeg / (360 / KN_N)) % KN_N;
     const [nx, ny] = knPolar(knNeedleDeg(i), KN_NEEDLE_R);
-    out.push(K.lineSvg(K.segment(eye, [nx, ny, KN_CYL.top + KN_LIFT * 0.9], P), { tone: "lit" }));
+    const tip = KN_CYL.top + knLift(knWrap(knNeedleDeg(i) - camDeg));
+    out.push(K.lineSvg(K.segment(eye, [nx, ny, tip], P), { tone: "lit" }));
   }
   out.push(K.dotsSvg([K.iso(eye, P)], { size: 0.6, tone: "hi" }));
   return out.join("");
 }
 
-// Cut candidates: short ends that drop from the eye and fade.
+// The yarns below the gate: from each spool up into its slot. Drawn before the gate block, which
+// covers where each one enters.
+export function knYarnsIn(feeds, P, K) {
+  return feeds
+    .map((on, k) => {
+      if (!on) return "";
+      const [gx, gy] = knGuide(k);
+      const [sx, sy] = knSpool(k);
+      return K.lineSvg(K.segment([sx, sy, KN_SPOOL_Z + 10], [gx, gy, KN_GATE.z + 2], P), { tone: k === 0 ? "hi" : "lo" });
+    })
+    .join("");
+}
+
+// The gate: a block on the mast with one slot per yarn, each with a shutter that slides across it.
+// open[k] runs from 0 (shut) to 1 (open); the card at the reader sets it, through the cable in the mast.
+export function knGate(open, P, K) {
+  const g = KN_GATE;
+  const a = KN_MAST.a;
+  const out = [K.solidSvg(K.extrude(knSector(a, g.half, g.rIn, g.rOut, 8), g.z, g.top - g.z, P, { bevel: 0.4 }), { tone: "mid" })];
+  const holes = [];
+  KN_FEEDS.forEach((_, k) => {
+    const [x, y] = knGuide(k);
+    holes.push(K.ring(x, y, 1.1, g.top, P, 12));
+  });
+  out.push(K.lineSvg(holes.join(""), { tone: "lo" }));
+  const shutters = KN_FEEDS.map((t, k) => {
+    const off = t + 2.4 + open[k] * g.shut;
+    const ring = [along(a, KN_MAST.r + 2.2, off - 1.4), along(a, KN_MAST.r + 4.8, off - 1.4), along(a, KN_MAST.r + 4.8, off + 1.4), along(a, KN_MAST.r + 2.2, off + 1.4)];
+    const [cx, cy] = along(a, KN_MAST.r + 3.5, off);
+    return { depth: cx + cy, svg: K.solidSvg(K.extrude(ring, g.top, 0.9, P), { tone: k === 0 ? "hi" : "mid", crease: "none" }) + K.dotsSvg([K.iso([cx, cy, g.top + 0.9], P)], { size: 0.4, tone: "lo" }) };
+  });
+  shutters.sort((p, q) => p.depth - q.depth).forEach((sh) => out.push(sh.svg));
+  return out.join("");
+}
+
+// Cut candidates: short ends that drop and fade, from the gate (stopped at the boundary) or from the
+// feeder eye (let in, but not the one the stitch took).
 export function knSnippets(list, P, K) {
   return list
     .map((s) => {
       const t = s.t;
-      const [x, y] = knPolar(s.deg, KN_EYE.r + 2 + t * 6);
-      const z = KN_EYE.z - t * t * 14;
+      const [x0, y0, z0] = s.at;
+      const x = x0 + Math.cos(s.tilt) * t * 3;
+      const y = y0 + Math.sin(s.tilt) * t * 3;
+      const z = z0 - t * t * 12;
       const d = K.segment([x, y, z], [x + Math.cos(s.tilt) * 1.6, y + Math.sin(s.tilt) * 1.6, z - 2.2], P);
       return `<g opacity="${(1 - t).toFixed(2)}">${K.lineSvg(d, { tone: "lo", free: true })}</g>`;
     })

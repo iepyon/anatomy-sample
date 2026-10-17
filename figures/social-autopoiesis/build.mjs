@@ -114,7 +114,7 @@ function mast() {
   const [x, y] = polar(m.a, m.r);
   const out = [];
   out.push(S(k.cylinder(x, y, 3.4, BED.top, 2, P, 20), { tone: "mid" }));
-  out.push(S(k.cylinder(x, y, 1.8, BED.top + 2, m.top - BED.top - 4, P, 16), { tone: "mid", crease: "none" }));
+  out.push(S(k.cylinder(x, y, 1.8, BED.top + 2, M.KN_GATE.z - 2 - BED.top - 2, P, 16), { tone: "mid", crease: "none" }));
   const shelf = M.knSector(m.a, 22, m.r - 3, m.r + 9, 6);
   out.push(S(k.extrude(shelf, M.KN_SPOOL_Z - 2, 2, P, { bevel: 0.4 }), { tone: "mid" }));
   M.KN_FEEDS.forEach((_, i) => {
@@ -126,10 +126,13 @@ function mast() {
     out.push(S(k.cylinder(sx, sy, r + 1.2, z + 9, 1, P, 24), { tone: "mid" }));
     out.push(D([at([sx, sy, z + 10])], { size: 0.45, tone: "lo" }));
   });
-  const bar = M.knSector(m.a, 21, m.r + 1.6, m.r + 4.4, 6);
-  out.push(S(k.cylinder(x, y, 2.6, m.top - 4, 2, P, 16), { tone: "mid" }));
-  out.push(S(k.extrude(bar, m.top - 2, 2, P), { tone: "mid", crease: "none" }));
-  out.push(L(M.KN_FEEDS.map((_, i) => { const g = M.knGuide(i); return k.ring(g[0], g[1], 1, m.top, P, 12); }).join(""), { tone: "lo" }));
+  out.push(S(k.cylinder(x, y, 2.6, M.KN_GATE.z - 2, 2, P, 16), { tone: "mid" }));
+  // The card reader's cable: along the bed rim to the foot of the mast, then up inside it to the gate.
+  const route = [[...polar(M.KN_CARD.a, 45), M.KN_CARD.z + 3.6]];
+  for (let a = M.KN_CARD.a - 2; a >= m.a + 8; a -= 6) route.push([...polar(a, 39.6), BED.top + 0.5]);
+  route.push([...polar(m.a + 4, 39.6), BED.top + 0.5]);
+  const pts = route.map(at);
+  out.push(k.wireSvg(pts[0], pts[pts.length - 1], { via: pts.slice(1, -1), tone: "mid", size: 0.8 }));
   return out.join("");
 }
 
@@ -175,7 +178,7 @@ const svg = k.figureSvg({
   width: WIDTH,
   height: HEIGHT,
   label:
-    "AIエージェントを含む社会システムの自己産出を、円筒形の靴下編み機として表した図。カムが一周するあいだに、針が一本ずつ持ち上がって糸を取り、前の段の輪に新しい輪を引き抜く。編み目は前の段の目を次の段が引き抜いたときにだけ留まる。糸は外の糸巻きから差し出される。人の糸巻きが一つ、AIの糸巻きが三つある。どの糸を取るかは型紙カードが決め、取られなかったAIの糸は切れて消える。型紙カードは編み上がった段から打ち抜かれる。編み地は下の桶にたまり続ける。",
+    "AIエージェントを含む社会システムの自己産出を、円筒形の靴下編み機として表した図。編み目（決定）が型紙カード（決定前提）を作り、カードがマスト上の糸のゲート（境界）を開け閉めし、ゲートを通った糸だけが新しい編み目になる。カムが一周するあいだに、針が一本ずつ持ち上がって糸を取り、前の段の輪に新しい輪を引き抜く。編み目は前の段の目を次の段が引き抜いたときにだけ留まる。糸は外の糸巻きから差し出される。人の糸巻きが一つ、AIの糸巻きが三つある。どの糸を取るかは型紙カードが決め、取られなかったAIの糸は切れて消える。型紙カードは編み上がった段から打ち抜かれる。編み地は下の桶にたまり続ける。",
   body: [
     plate(),
     leg(225),
@@ -186,6 +189,8 @@ const svg = k.figureSvg({
     leg(45),
     bed(),
     mast(),
+    live0("yarnsIn", M.knYarnsIn(FEEDS0, P, K)),
+    live0("gate", M.knGate([1, 0, 0, 0], P, K)),
     cardTable(),
     live0("cards", M.knCards(CARDS0, 0, P, K)),
     punch(),
@@ -194,7 +199,7 @@ const svg = k.figureSvg({
     live0("needles", M.knNeedles(CAM0, -1, P, K, "front")),
     live0("carFront", camBack ? "" : M.knCarriage(CAM0, P, K)),
     live0("tips", M.knNeedles(CAM0, -1, P, K, "tips", camBack ? M.KN_CYL.top : M.KN_CAR.top)),
-    live0("yarns", M.knYarns(CAM0, FEEDS0, -1, P, K)),
+    live0("yarns", M.knYarns(CAM0, FEEDS0, [1, 0, 0, 0], -1, P, K)),
     live0("snips", ""),
   ],
 });
@@ -208,7 +213,7 @@ const K = { solidSvg, extrude, cylinder, lineSvg, ring, dotsSvg, iso, lineOnTop,
 const stage = document.querySelector(".iso-stage");
 const svg = stage.querySelector("svg");
 const part = (name) => svg.querySelector('[data-part="' + name + '"]');
-const G = { fabric: part("fabric"), cards: part("cards"), carBack: part("carBack"), needles: part("needles"), carFront: part("carFront"), tips: part("tips"), yarns: part("yarns"), snips: part("snips") };
+const G = { yarnsIn: part("yarnsIn"), gate: part("gate"), fabric: part("fabric"), cards: part("cards"), carBack: part("carBack"), needles: part("needles"), carFront: part("carFront"), tips: part("tips"), yarns: part("yarns"), snips: part("snips") };
 const readout = document.querySelector("[data-readout]");
 const still = matchMedia("(prefers-reduced-motion: reduce)");
 const ROUND = 6.4; // seconds per turn of the cam
@@ -220,7 +225,8 @@ let streak = new Array(KN_GROUPS).fill(0);
 let misses = new Array(KN_N).fill(0);
 let feeds = [true, true, true, true];
 let cam = ${CAM0}, next = Math.ceil(${CAM0} / STEP), shift = 0, take = -1, takeT = 0, stopped = false, droppedAt = -1;
-let conn = 0, offered = 0, aiConn = 0;
+let conn = 0, offered = 0, aiConn = 0, gateCut = 0, eyeCut = 0;
+let gate = [1, 0, 0, 0];
 let snips = [];
 let speed = 1, fast = false, frame = 0, last = 0, visible = false, seed = 7;
 const rand = () => { seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0; return seed / 4294967296; };
@@ -233,19 +239,25 @@ function say() {
     const risk = misses.filter((m) => m > 0).length;
     return "人の糸なし · 人を要する目が編めない（落ちかけ " + risk + " 目）";
   }
-  return "接続 " + fmt(conn) + " · AIの候補 " + fmt(offered) + " 件のうち " + pct + "% が接続";
+  const out = offered ? Math.round((gateCut / offered) * 100) : 0;
+  return "接続 " + fmt(conn) + " · AIの候補 " + fmt(offered) + " 件：境界の外 " + out + "% · 接続 " + pct + "%";
 }
 function stitch(i) {
   const need = cards[0][Math.floor(i / 3)];
   const deg = knNeedleDeg(i);
-  const cut = (n) => { for (let c = 0; c < n; c++) snips.push({ deg: deg + (rand() - 0.5) * 6, tilt: rand() * Math.PI * 2, t: 0 }); };
+  const [ex, ey] = knPolar(cam, KN_EYE.r);
+  const cutAt = (at) => snips.push({ at, tilt: rand() * Math.PI * 2, t: 0 });
   offered += 3;
   if (need === "H") {
-    cut(3);
+    // The boundary is shut to the AI yarns: all three stop outside the gate.
+    for (let k = 1; k < 4; k++) { const [gx, gy] = knGuide(k); cutAt([gx, gy, KN_GATE.z - 1]); }
+    gateCut += 3;
     if (feeds[0]) { current[i] = "H"; misses[i] = 0; conn++; take = 0; }
     else { current[i] = "x"; misses[i]++; take = -1; if (misses[i] >= KN_MISS_DROP && !stopped) { stopped = true; droppedAt = i; } }
   } else {
-    cut(2);
+    // The boundary is open to the AI yarns: all three come in, the stitch takes one.
+    for (let c = 0; c < 2; c++) cutAt([ex, ey, KN_EYE.z]);
+    eyeCut += 2;
     current[i] = "A"; misses[i] = 0; conn++; aiConn++; take = 1;
   }
   takeT = 0.5;
@@ -271,7 +283,9 @@ function draw() {
   const lit = Math.round(cam / STEP) % KN_N;
   G.needles.innerHTML = knNeedles(cam, lit, P, K, "front");
   G.tips.innerHTML = knNeedles(cam, lit, P, K, "tips", back ? KN_CYL.top : KN_CAR.top);
-  G.yarns.innerHTML = knYarns(cam, feeds, takeT > 0 ? take : -1, P, K);
+  G.yarnsIn.innerHTML = knYarnsIn(feeds, P, K);
+  G.gate.innerHTML = knGate(gate, P, K);
+  G.yarns.innerHTML = knYarns(cam, feeds, gate, takeT > 0 ? take : -1, P, K);
   G.snips.innerHTML = knSnippets(snips, P, K);
   const shown = [current.map((g, i) => g || (i < next ? "x" : null)).map((g) => g || "-"), ...rows];
   G.fabric.innerHTML = knFabric(shown.map((r) => r.map((g) => (g === "-" ? null : g))), (cam % 360) / 360, P, K);
@@ -295,6 +309,9 @@ function tick(now) {
     }
   }
   takeT = Math.max(0, takeT - step);
+  // The card at the reader sets the gate for the group of the needle coming up.
+  const want = cards[0][Math.floor((next % KN_N) / 3)] === "H" ? [1, 0, 0, 0] : [0, 1, 1, 1];
+  gate = gate.map((v, k) => v + (want[k] - v) * (1 - Math.exp(-dt / 0.12)));
   shift = Math.max(0, shift - step / 0.7);
   snips = snips.map((s) => ({ ...s, t: s.t + step / 0.9 })).filter((s) => s.t < 1);
   draw();
@@ -322,13 +339,13 @@ const body = k.plateHtml({
   hint: "ホバーで早送り · クリックで人の糸を止める",
   readout: "接続 0 · AIの候補 0 件のうち 0% が接続",
   keys: [
-    { mark: "lit", label: "いま生まれている編み目＝一回のコミュニケーション（次の段に引き抜かれて理解になる）" },
-    { mark: "edge", label: "糸＝伝達の候補。太いのが人、細いのがAI。取られなかったAIの糸は切れて消える" },
-    { mark: "raised", label: "型紙カード＝決定前提。編み上がった段から次のカードが打ち抜かれる" },
-    { mark: "flat", label: "編み地＝記録。消えずに桶へたまる" },
+    { mark: "lit", label: "① 決定：いま生まれている一目。次の段に引き抜かれて初めて留まる" },
+    { mark: "raised", label: "② 決定前提：型紙カード。編み上がった段から打ち抜かれる" },
+    { mark: "edge", label: "③ 境界：マスト上の糸のゲート。カードが口の開け閉めを決める" },
+    { mark: "flat", label: "糸：人（太）とAI（細）が外から差し出す伝達の候補" },
   ],
   caption:
-    "この機械が産出するのは編み目だけで、編み目は編み目からしか生まれない。カムが針を一本持ち上げた瞬間に一目が生まれ、すぐに過去になる。その目が留まるのは、次の段の輪がそこを引き抜いたときだけで、これがルーマンの言う「理解は次の接続で成立する」にあたる。人もAIもこの機械の外にいて、糸を差し出すだけ。人の糸巻きは一つ、AIの糸巻きは三つで、AIは一目ごとに三本の候補を差し出すが、多くはつながらずに切れて消える。どの糸を取るかは型紙カード（決定前提）が決める。カードは編み上がった段から打ち抜かれ、四段あとに効く。人の糸で二段続けて留まった組はAIへ任され、AIが三段続けた組は人の確認へ戻る。決定が決定前提を作り、決定前提が次の決定を選ぶ。クリックで人の糸を止めると、人を要する目が編めず、二段続けて抜けた針から目が落ち、接続が途切れて系は止まる。編み地（記録）だけは桶にたまり続ける。",
+    "この機械は三つの項の輪だけで回る。① 決定（編み目）が ② 決定前提（型紙カード）を作り、② が ③ 境界（糸のゲート）を開け閉めし、③ を通った糸だけが ① の新しい目になる。決定を産出する機構（ゲート）は、カードを介して決定自身が作っている。外から機構を据え付ける者はいない。カムが針を一本持ち上げた瞬間に一目が生まれ、すぐに過去になる。その目は、次の段の輪に引き抜かれたときにだけ留まる。人とAIは輪の外にいて、糸巻きから糸を差し出すだけ。カードが人の糸を求める組では、ゲートはAIの口を閉じ、AIの三本は境界の外で切れる。AIの糸を許す組では三本とも中に入り、針が一本を取って残りは中で切れる。カードは編み上がった段から打ち抜かれ、四段あとにゲートを動かす。人の糸で二段続けて留まった組はAIへ任され、AIが三段続けた組は人へ戻る。クリックで人の糸を止めると、人を要する目が編めずに目が落ち、輪が途切れて機械は止まる。編み地は輪が回った跡として桶にたまる。",
   body: `<div class="iso-stage" tabindex="0" role="img" aria-label="接続で自分を産出する社会システム">${svg}</div>`,
 });
 
